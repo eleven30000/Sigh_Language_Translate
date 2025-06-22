@@ -77,6 +77,8 @@ class SignLanguageVideoDataset(Dataset):
                 fn = f"{vsn}{video_ext}"
                 # combine input + output (instruction 已在 prompt)
                 tmp[fn] = item.get("input", "") + " " + item.get("output", "")
+                # tmp[fn] = item.get("output", "")
+
             self.label_map = tmp
         else:
             raise ValueError("Unsupported JSON structure for labels.")
@@ -86,7 +88,14 @@ class SignLanguageVideoDataset(Dataset):
         self.image_processor = image_processor
         self.T = T
         self.tpl = tpl
-
+        self.valid_index = []
+        for i, vpath in enumerate(self.video_paths):
+            video_np, ft, vl = load_video(vpath, self.T)
+            if video_np is not None:
+                self.valid_index.append((i, video_np, ft, vl))
+            else:
+                print("[skip] bad video:", vpath)
+                
     def __len__(self):
         return len(self.video_paths)
 
@@ -130,11 +139,13 @@ def make_collate_fn(tokenizer, image_processor, *, tpl: str = "qwen_1_5", device
         for s in samples:
             # (a) video -> tensor (float32, CPU)
             
-            pil_frames = [Image.fromarray(f).resize((224, 224), Image.BICUBIC)
-                          for f in s["video_np"]]
+            pil_frames = [Image.fromarray(f) for f in s["video_np"]]
+
             video_pt = image_processor.preprocess(
-                pil_frames, return_tensors="pt"
+                pil_frames,
+                return_tensors="pt"
             )["pixel_values"].to(dtype=torch.float32)   # 留在 CPU
+            
             batch_video_tensors.append(video_pt)
 
             # (b) build prompt

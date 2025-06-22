@@ -27,7 +27,7 @@ MODEL_NAME  = "lmms-lab/LLaVA-Video-7B-Qwen2"
 
 BATCH_SIZE  = 1
 NUM_WORKERS = 4
-EPOCHS      = 50
+EPOCHS      = 30
 LR          = 5e-4
 FRAMES      = 16
 DEVICE      = "cuda"                        # or "cpu"
@@ -69,39 +69,26 @@ class LLaVAWithAdapter(nn.Module):
             input_ids=input_ids,
             images=images,
             modalities=modalities,
-            output_hidden_states=True,   # ★ 改成 False
+            output_hidden_states=True,   
             return_dict=True,
             use_cache=False,
         )
+
         hidden = outputs.hidden_states[-1][:, :input_ids.size(1), :]  # 對齊
-        hidden = self.adapter(hidden)
-        logits = self.lm_head(hidden)                  # (B, L, vocab)
-        #print("hidden.shape:", hidden.shape)
-        #print("logits.shape:", logits.shape)
+        hidden = self.adapter(hidden)                  # (1, 424, 3584)
+        logits = self.lm_head(hidden)                  # (1, 424, 151647)
+        # print("hidden.shape:", hidden.shape)
+        # print("logits.shape:", logits.shape)
         loss = None
 
         if labels is not None:
-            '''
-            # Step 1: 自動補長 labels 成跟 logits 對齊
-            B, L_logits = logits.shape[:2]     # e.g. (1, 3823)
-            B, L_labels = labels.shape         # e.g. (1, 463)
-
-            if L_logits != L_labels:
-                new_labels = torch.full(
-                    (B, L_logits), -100,
-                    dtype=labels.dtype,
-                    device=labels.device
-                )
-                # 將原始 labels 貼到尾端，讓答案對齊序列末尾
-                new_labels[:, -L_labels:] = labels
-                labels = new_labels'''
         
-            #print("labels:", labels)
-            #print("labels shape:", labels.shape)
+            # print("labels:", labels)
+            # print("labels shape:", labels.shape)
             shift_logits = logits[..., :-1, :].contiguous()
             shift_labels = labels[..., 1:].contiguous()
-            #print(shift_logits.shape)
-            #print(shift_labels.shape)
+            # print(shift_logits.shape)
+            # print(shift_labels.shape)
             loss_fct = nn.CrossEntropyLoss(ignore_index=-100)
             loss = loss_fct(
                 shift_logits.view(-1, shift_logits.size(-1)),
@@ -120,31 +107,31 @@ def build_prompt_and_labels(prompt_ids: torch.Tensor,
 
     valid_len = (prompt_ids != pad_id).sum().item()
     prompt_ids = prompt_ids[:valid_len]
-    #print("prompt_ids shape:", prompt_ids.shape)
+    # print("prompt_ids shape:", prompt_ids.shape)
     answer_ids = tokenizer(
         answer, add_special_tokens=False,
         return_tensors="pt"
     ).input_ids.squeeze(0).to(device)
-    #print("prompt_ids:", prompt_ids)
-    #print("prompt_ids shape:", prompt_ids.shape)
-    #print("answer_ids :", answer_ids)
-    #print("answer_ids shape:", answer_ids.shape)
+    # print("prompt_ids:", prompt_ids)
+    # print("prompt_ids shape:", prompt_ids.shape)
+    # print("answer_ids :", answer_ids)
+    # print("answer_ids shape:", answer_ids.shape)
 
-    MAX_ANS_TOK = 256
-    if answer_ids.size(0) > MAX_ANS_TOK:
-        answer_ids = answer_ids[-MAX_ANS_TOK:]
+    # MAX_ANS_TOK = 256
+    # if answer_ids.size(0) > MAX_ANS_TOK:
+    #     answer_ids = answer_ids[-MAX_ANS_TOK:]
 
     eos = torch.tensor([tokenizer.eos_token_id], device=device)
     answer_ids = torch.cat([answer_ids, eos], dim=0)
-    #print("answer_ids 2:", answer_ids)
-    #print("answer_ids shape2:", answer_ids.shape)
+    # print("answer_ids 2:", answer_ids)
+    # print("answer_ids shape2:", answer_ids.shape)
     combined = torch.cat([prompt_ids, answer_ids], dim=0)
     labels = torch.full_like(combined, -100)
     labels[prompt_ids.size(0):] = combined[prompt_ids.size(0):]
-    #print("labels:", labels)
-    #print("labels shape:", labels.shape)
-    #print("combined:", combined)
-    #print("combined shape:", combined.shape)
+    # print("labels:", labels)
+    # print("labels shape:", labels.shape)
+    # print("combined:", combined)
+    # print("combined shape:", combined.shape)
     #labels是combined的label，combined是prompt_ids和answer_ids的結合
     return combined, labels
 
@@ -203,10 +190,10 @@ def main():
             for i, (ids, lbl) in enumerate(zip(prompt_ids_list, label_ids_list)):
                 input_ids[i, :ids.size(0)] = ids.to(DEVICE)
                 label_ids[i, :lbl.size(0)] = lbl.to(DEVICE)
-            #print("!!input_ids:", input_ids)
-            #print("!!input_ids shape:", input_ids.shape)
-            #print("!!label_ids:", label_ids)
-            #print("!!label_ids shape:", label_ids.shape)
+            # print("!!input_ids:", input_ids)
+            # print("!!input_ids shape:", input_ids.shape)
+            # print("!!label_ids:", label_ids)
+            # print("!!label_ids shape:", label_ids.shape)
             # -- 處理影像 --
             images = [v.to(DEVICE, dtype=torch.bfloat16) for v in batch["images"]]
 
@@ -214,9 +201,9 @@ def main():
                         images=images,
                         modalities=["video"],
                         labels=label_ids)
-            #print("out:", out)
+            # print("out:", out)
             loss = out["loss"]
-            #print("loss:", loss)
+            # print("loss:", loss)
             optim.zero_grad(set_to_none=True)
             loss.backward()
             optim.step()
@@ -225,7 +212,7 @@ def main():
 
     # 5. 儲存 adapter
     os.makedirs(OUTPUT_DIR, exist_ok=True)
-    torch.save(model.adapter.state_dict(), os.path.join(OUTPUT_DIR, "adapter_init.pt"))
+    torch.save(model.adapter.state_dict(), os.path.join(OUTPUT_DIR, "adapter_init_no_gloss.pt"))
     print("✅ Training done. Adapter saved to", OUTPUT_DIR)
 
 
